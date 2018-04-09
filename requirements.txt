@@ -1,0 +1,5 @@
+Flask==0.12.2
+odoorpc==0.6.1
+flask_bootstrap
+flask_babel
+flask_wtf
