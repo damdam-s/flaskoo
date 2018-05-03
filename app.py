@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import os
 import ConfigParser
-import erppeek
+import odoorpc
 import bz2
 import socket
 from functools import wraps
@@ -10,8 +10,9 @@ from flask_bootstrap import Bootstrap
 from flask import (
     Flask, render_template, request, abort,
     session, redirect, url_for, flash)
-from flask.ext.babel import Babel, gettext as _
+from flask_babel import Babel, gettext as _
 from form import LoginForm
+
 
 def get_config():
     '''Get values from cfg file'''
@@ -26,6 +27,7 @@ def get_config():
             results[section][option] = config.get(section, option)
     return results
 
+
 def create_app(config=None):
     '''Create Flask APP'''
     cfg = get_config()
@@ -35,24 +37,24 @@ def create_app(config=None):
     app.config.from_pyfile(config)
     return app
 
+
 def parse_setup(filename):
     globalsdict = {}  # put predefined things here
     localsdict = {}  # will be populated by executed script
     execfile(filename, globalsdict, localsdict)
     return localsdict
 
+
 def get_lang():
     return app.config.get('LANGUAGE')
+
 
 def erp_connect():
     '''OpenERP Connection'''
     server = app.config.get('OPENERP_SERVER')
-    database = app.config.get('OPENERP_DATABASE')
-    username = session['username']
-    password = bz2.decompress(session['password'])
+    port = app.config.get('OPENERP_SERVER_PORT')
     try:
-        Client = erppeek.Client(server, db=database, user=username,
-                                password=password)
+        Client = odoorpc.ODOO(server, port=port)
     except socket.error:
         flash(_("Can't connect to ERP server. Check network-ports"
                 "or ERP server was running."))
@@ -60,6 +62,7 @@ def erp_connect():
     except:
         abort(500)
     return Client
+
 
 def login_required(f):
     @wraps(f)
@@ -70,11 +73,13 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
+
 conf_file = '%s/config.cfg' % os.path.dirname(os.path.realpath(__file__))
 app = create_app(conf_file)
 app.config['BABEL_DEFAULT_LOCALE'] = get_lang()
 app.root_path = os.path.dirname(os.path.abspath(__file__))
 babel = Babel(app)
+
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -86,20 +91,22 @@ def login():
         password = bz2.compress(request.form.get('password'))
         session['username'] = username
         session['password'] = password
-
+        database = app.config.get('OPENERP_DATABASE')
         Client = erp_connect()
-        login = Client.login(username, bz2.decompress(password),
-                             app.config.get('OPENERP_DATABASE'))
-        if login:
+        try:
+            Client.login(database, username,
+                         bz2.decompress(password))
             session['logged_in'] = True
             flash(_('You were logged in.'))
             return redirect(url_for('index'))
-        else:
+        except odoorpc.error.RPCError as e:
+            print e.message
             flash(_('Error: Invalid username %s or password'
                     % session.get('username')))
         data['username'] = username
 
     return render_template('login.html', form=form, data=data)
+
 
 @app.route('/logout')
 @login_required
